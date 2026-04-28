@@ -214,6 +214,13 @@ type ChatMessage = {
   role: 'user' | 'assistant';
   content: string;
   timestamp: Date;
+  medicalResult?: {
+    disease: string;
+    medicines: string;
+    precautions: string;
+    red_flags: string;
+    remedies: string;
+  };
 };
 
 type AshaWorker = {
@@ -1591,6 +1598,18 @@ export default function App() {
         Your goal is to triage symptoms, recommend basic first aid, and strictly advise hospital visits for red-flag cases.
         Context: The user is an ASHA worker. 
         Current Patient Context: ${activePatient ? `Name: ${activePatient.name}, Age: ${activePatient.age}, Disease: ${activePatient.disease}` : "No patient selected"}.
+        
+        When a user provides symptoms, your goal is to provide a structured analysis.
+        If you have enough information to provide a diagnosis or summary, ALWAYS include a JSON block at the end of your message in this format:
+        {
+          "summary": "Short conversational summary",
+          "disease": "Possible condition name",
+          "medicines": "List of common medicines",
+          "precautions": "What to do/not do",
+          "red_flags": "When to see a doctor immediately",
+          "remedies": "Home remedies"
+        }
+        
         Always provide clear, concise advice in the selected language: ${selectedLanguage}.
         Never invent medical facts. If unsure, advise seeing a doctor.`;
 
@@ -1603,10 +1622,30 @@ export default function App() {
       }
 
       const result = await chatSessionRef.current.sendMessage(userMsg.content);
+      const responseText = result.response.text();
+      
+      let medicalResult: any = null;
+      let plainText = responseText;
+
+      // Try to extract JSON if the bot followed the instruction
+      try {
+        const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          if (parsed.disease && parsed.medicines) {
+            medicalResult = parsed;
+            plainText = parsed.summary || `I've analyzed the symptoms. Here's a summary for ${parsed.disease}:`;
+          }
+        }
+      } catch (e) {
+        // Not JSON, continue with plain text
+      }
+
       const assistantMsg: ChatMessage = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: result.response.text(),
+        content: plainText,
+        medicalResult: medicalResult,
         timestamp: new Date()
       };
 
@@ -3196,12 +3235,59 @@ Crucially, all the values inside the JSON MUST be translated to this language: $
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
                 >
-                  <div className={`max-w-[85%] p-4 rounded-3xl shadow-sm ${
+                  <div className={`max-w-[90%] p-4 rounded-3xl shadow-sm ${
                     msg.role === 'user' 
                       ? 'bg-primary-600 text-white rounded-tr-none' 
                       : 'bg-white border border-stone-100 text-stone-800 rounded-tl-none'
                   }`}>
                     <p className="text-sm font-medium leading-relaxed whitespace-pre-wrap">{msg.content}</p>
+                    
+                    {msg.medicalResult && (
+                      <div className="mt-4 space-y-3 animate-in fade-in slide-in-from-top-2 duration-500">
+                        <div className="bg-primary-50 p-4 rounded-2xl border border-primary-100">
+                          <h4 className="text-[10px] font-black text-primary-600 uppercase tracking-widest mb-1">Possible Disease</h4>
+                          <p className="text-lg font-black text-stone-800">{msg.medicalResult.disease}</p>
+                        </div>
+                        
+                        <div className="bg-stone-50 p-4 rounded-2xl border border-stone-100">
+                          <h4 className="text-[10px] font-black text-stone-400 uppercase tracking-widest mb-1">Medicines</h4>
+                          <p className="text-xs font-bold text-stone-700 leading-relaxed">{msg.medicalResult.medicines}</p>
+                        </div>
+
+                        <div className="bg-rose-50 p-4 rounded-2xl border border-rose-100">
+                          <h4 className="text-[10px] font-black text-rose-600 uppercase tracking-widest mb-1 flex items-center gap-1">
+                            <AlertTriangle className="w-3 h-3" /> Red Flags
+                          </h4>
+                          <p className="text-xs font-black text-rose-800 leading-relaxed">{msg.medicalResult.red_flags}</p>
+                        </div>
+
+                        <div className="bg-emerald-50 p-4 rounded-2xl border border-emerald-100">
+                          <h4 className="text-[10px] font-black text-emerald-600 uppercase tracking-widest mb-1">Precautions</h4>
+                          <p className="text-xs font-bold text-emerald-800 leading-relaxed">{msg.medicalResult.precautions}</p>
+                        </div>
+                        
+                        <button 
+                          onClick={() => {
+                            const result = msg.medicalResult!;
+                            setMedResult({
+                              id: Date.now(),
+                              disease: result.disease,
+                              medicines: result.medicines,
+                              precautions: result.precautions,
+                              red_flags: result.red_flags,
+                              remedies: result.remedies,
+                              keywords: [],
+                              duration_warning: ''
+                            });
+                            handleSaveReport();
+                          }}
+                          className="w-full bg-primary-600 text-white text-[10px] font-black uppercase tracking-widest py-3 rounded-xl shadow-md shadow-primary-100 active:scale-95 transition-all"
+                        >
+                          Save to Patient Records
+                        </button>
+                      </div>
+                    )}
+
                     <p className={`text-[10px] mt-1.5 font-bold uppercase opacity-50 ${msg.role === 'user' ? 'text-white' : 'text-stone-400'}`}>
                       {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </p>
