@@ -8,7 +8,7 @@ import { VitePWA } from 'vite-plugin-pwa';
 export default defineConfig(({mode}) => {
   const env = loadEnv(mode, '.', '');
   return {
-    base: '/AashaLink_v2.3/',
+    base: '/AashaLink_v2.4/',
     plugins: [
       react(), 
       tailwindcss(),
