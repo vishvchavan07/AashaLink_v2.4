@@ -1,0 +1,1 @@
+if('serviceWorker' in navigator) {window.addEventListener('load', () => {navigator.serviceWorker.register('/AashaLink_v2.3/sw.js', { scope: '/AashaLink_v2.3/' })})}
