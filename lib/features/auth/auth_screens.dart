@@ -1,5 +1,11 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:lucide_icons/lucide_icons.dart';
+import 'package:aashalink/core/l10n/app_localizations.dart';
+import 'package:aashalink/core/theme/app_theme.dart';
+import 'package:aashalink/core/providers/providers.dart';
 
 /// AuthGate — shown at route '/'.
 /// Listens to Firebase auth stream, redirects to /home when authenticated.

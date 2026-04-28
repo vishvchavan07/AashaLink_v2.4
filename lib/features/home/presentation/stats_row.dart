@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_gen/gen_l10n/app_localizations.dart';
+import 'package:aashalink/core/l10n/app_localizations.dart';
 import '../../../core/theme/app_colors.dart';
 
 /// Stats row — 3 equal columns with count-up animation on entry.

@@ -47,8 +47,14 @@ import {
   Package,
   History as LucideHistory,
   Sun,
+  Moon,
   Share2,
-  Bot
+  Bot,
+  Send,
+  MessageSquare,
+  Sparkles,
+  MessageCircle,
+  ChevronDown
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
@@ -99,7 +105,7 @@ const langCodeMap: Record<Language, string> = {
   Tamil: 'ta-IN',
   Kannada: 'kn-IN'
 };
-type Screen = 'home' | 'patient-records' | 'blood-bank' | 'med-assistant' | 'bed-availability' | 'voice-diary' | 'settings' | 'language' | 'login' | 'profile' | 'permissions' | 'asha-news' | 'supply-requests';
+type Screen = 'home' | 'patient-records' | 'blood-bank' | 'med-assistant' | 'med-chat' | 'bed-availability' | 'voice-diary' | 'settings' | 'language' | 'login' | 'profile' | 'permissions' | 'asha-news' | 'supply-requests';
 
 const translations = initialTranslations;
 
@@ -203,6 +209,13 @@ type KitTemplate = { name: string; items: SupplyItem[]; icon: any };
 type BloodBank = { name: string; address: string; phone: string; lat: number; lng: number; groups: string[]; lowStockGroups?: string[]; distance: number };
 type VoiceDiaryEntry = { id: string; patientName: string; date: string; duration: string; transcript: string; translatedTranscript?: string; tags?: string[] };
 
+type ChatMessage = {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: Date;
+};
+
 type AshaWorker = {
   name: string;
   ashaId: string;
@@ -262,7 +275,7 @@ const NetworkIndicator = ({ status, syncStatus, onToggle }: { status: NetworkSta
 const FeatureCard = ({ icon: Icon, label, k, onClick }: { icon: any; label: string; k?: string; onClick: () => void }) => (
   <motion.button
     whileTap={{ scale: 0.94, rotate: [-1, 1, 0] }}
-    whileHover={{ y: -4, shadow: "0 20px 25px -5px rgb(0 0 0 / 0.1)" }}
+    whileHover={{ y: -4, boxShadow: "0 20px 25px -5px rgb(0 0 0 / 0.1)" }}
     onClick={onClick}
     className="glass-card p-6 rounded-3xl flex flex-col items-center justify-center gap-3 group relative overflow-hidden transition-shadow"
   >
@@ -586,6 +599,26 @@ export default function App() {
   const [showMockNotification, setShowMockNotification] = useState(false);
   const [deviceType, setDeviceType] = useState<'mobile' | 'tablet' | 'desktop'>('mobile');
 
+  // --- MediChat State ---
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
+    {
+      id: 'welcome',
+      role: 'assistant',
+      content: 'Hello! I am your Medi Assistant. How can I help you today?',
+      timestamp: new Date()
+    }
+  ]);
+  const [chatInput, setChatInput] = useState('');
+  const [isChatLoading, setIsChatLoading] = useState(false);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
+  const chatSessionRef = useRef<any>(null);
+
+  useEffect(() => {
+    if (chatScrollRef.current) {
+      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+    }
+  }, [chatMessages]);
+
   useEffect(() => {
     const handleResize = () => {
       const width = window.innerWidth;
@@ -642,7 +675,7 @@ export default function App() {
       if (failedItems.length === 0) {
         setSyncStatus('synced');
         // Refresh local data from Firebase after sync
-        const freshPatients = await getCollectionData('patients');
+        const freshPatients = await getCollectionData('patients') as Patient[];
         if (freshPatients.length > 0) {
           setPatients(freshPatients);
           await localforage.setItem('aashalink_patients', freshPatients);
@@ -997,6 +1030,25 @@ export default function App() {
   const [helpWordCount, setHelpWordCount] = useState(0);
   const helpTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  const triggerSOS = (lat?: number, lng?: number) => {
+    setIsSosActive(true);
+    const locText = lat && lng ? `\n\nMy location: https://www.google.com/maps/search/?api=1&query=${lat},${lng} (${lat},${lng})` : "";
+    const message = `🚨 AASHALINK EMERGENCY! ASHA Worker ${authUser?.name} (ID: ${authUser?.ashaId}) is in DANGER and needs immediate help!${locText}`;
+    
+    // Sending SMS logic
+    const contacts = [authUser?.emergencyContact1, authUser?.supervisorContact].filter(Boolean);
+    
+    if (contacts.length > 0) {
+      contacts.forEach((phone, idx) => {
+        setTimeout(() => {
+          window.open(`sms:${phone}?body=${encodeURIComponent(message)}`, '_blank');
+        }, idx * 1000);
+      });
+    } else {
+      window.open(`whatsapp://send?text=${encodeURIComponent(message)}`, '_blank');
+    }
+  };
+
   useEffect(() => {
     if (!workerProfile.autoSosEnabled || isSosActive) return;
 
@@ -1021,11 +1073,11 @@ export default function App() {
             const occurrences = (transcript.match(/help/g) || []).length;
             setHelpWordCount(prev => {
               const newCount = prev + occurrences;
-              if (newCount >= 3) {
-                console.warn("🚨 VOICE SOS TRIGGERED!");
-                triggerSOS();
-                return 0;
-              }
+                  if (newCount >= 3) {
+                    console.warn("🚨 VOICE SOS TRIGGERED!");
+                    triggerSOS();
+                    return 0;
+                  }
               return newCount;
             });
 
@@ -1512,6 +1564,67 @@ export default function App() {
     }
   ];
 
+  const handleSendMessage = async () => {
+    if (!chatInput.trim() || isChatLoading) return;
+
+    const userMsg: ChatMessage = {
+      id: Date.now().toString(),
+      role: 'user',
+      content: chatInput.trim(),
+      timestamp: new Date()
+    };
+
+    setChatMessages(prev => [...prev, userMsg]);
+    setChatInput('');
+    setIsChatLoading(true);
+
+    try {
+      const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+      if (!apiKey) throw new Error("API Key missing");
+
+      const { GoogleGenerativeAI } = await import('@google/generative-ai');
+      const genAI = new GoogleGenerativeAI(apiKey);
+      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
+      if (!chatSessionRef.current) {
+        const systemInstruction = `You are a medical assistant for an ASHA worker in rural India. 
+        Your goal is to triage symptoms, recommend basic first aid, and strictly advise hospital visits for red-flag cases.
+        Context: The user is an ASHA worker. 
+        Current Patient Context: ${activePatient ? `Name: ${activePatient.name}, Age: ${activePatient.age}, Disease: ${activePatient.disease}` : "No patient selected"}.
+        Always provide clear, concise advice in the selected language: ${selectedLanguage}.
+        Never invent medical facts. If unsure, advise seeing a doctor.`;
+
+        chatSessionRef.current = model.startChat({
+          history: [
+            { role: 'user', parts: [{ text: "System Instruction: " + systemInstruction }] },
+            { role: 'model', parts: [{ text: "Understood. I am ready to assist as a clinical companion for ASHA workers." }] }
+          ]
+        });
+      }
+
+      const result = await chatSessionRef.current.sendMessage(userMsg.content);
+      const assistantMsg: ChatMessage = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: result.response.text(),
+        timestamp: new Date()
+      };
+
+      setChatMessages(prev => [...prev, assistantMsg]);
+    } catch (error) {
+      console.error("Chat error:", error);
+      const errorMsg: ChatMessage = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: "I'm sorry, I'm having trouble connecting to the AI engine. Please check your network or try again later.",
+        timestamp: new Date()
+      };
+      setChatMessages(prev => [...prev, errorMsg]);
+    } finally {
+      setIsChatLoading(false);
+    }
+  };
+
   const handleAnalyze = async () => {
     if (!medInput.symptoms) return;
     setMedStatus('loading');
@@ -1570,7 +1683,6 @@ export default function App() {
         const genAI = new GoogleGenerativeAI(import.meta.env.VITE_GEMINI_API_KEY);
         const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
         
-        const entityNames = nlpEntities.map(e => e.name).join(', ');
         const prompt = `You are a medical assistant for an ASHA worker in rural India.
 Suspected: ${medInput.disease}
 Symptoms: ${medInput.symptoms}
@@ -2029,29 +2141,6 @@ Crucially, all the values inside the JSON MUST be translated to this language: $
                         // SOS Morse Code Pattern: 3 short, 3 long, 3 short
                         navigator.vibrate([100, 100, 100, 100, 100, 200, 300, 200, 300, 200, 300, 200, 100, 100, 100, 100, 100]);
                       }
-                      
-                      const triggerSOS = (lat?: number, lng?: number) => {
-                        setIsSosActive(true);
-                        const locText = lat && lng ? `\n\nMy location: https://www.google.com/maps/search/?api=1&query=${lat},${lng} (${lat},${lng})` : "";
-                        const message = `🚨 AASHALINK EMERGENCY! ASHA Worker ${authUser?.name} (ID: ${authUser?.ashaId}) is in DANGER and needs immediate help!${locText}`;
-                        
-                        // Sending SMS logic
-                        // We use the sms: protocol which is widely supported in mobile browsers/PWAs
-                        const contacts = [authUser?.emergencyContact1, authUser?.supervisorContact].filter(Boolean);
-                        
-                        if (contacts.length > 0) {
-                          // Note: For background SMS, native Android implementation is required.
-                          // For PWA, we trigger the SMS app for each contact.
-                          contacts.forEach((phone, idx) => {
-                            setTimeout(() => {
-                              window.open(`sms:${phone}?body=${encodeURIComponent(message)}`, '_blank');
-                            }, idx * 1000); // Small delay to prevent popup blocking
-                          });
-                        } else {
-                          // Fallback to WhatsApp if no contacts defined
-                          window.open(`whatsapp://send?text=${encodeURIComponent(message)}`, '_blank');
-                        }
-                      };
 
                       if (navigator.geolocation) {
                         navigator.geolocation.getCurrentPosition(
@@ -2153,7 +2242,7 @@ Crucially, all the values inside the JSON MUST be translated to this language: $
                 )}
               </div>
               <button 
-                onClick={handleExportPDF}
+                onClick={() => handleExportPDF()}
                 className="bg-primary-600 text-white p-3.5 rounded-2xl flex items-center justify-center shadow-sm hover:bg-primary-700 transition-colors"
                 title={t_func_ctx("exportPdf", "Export PDF Report")}
               >
@@ -3071,6 +3160,99 @@ Crucially, all the values inside the JSON MUST be translated to this language: $
               </div>
             )}
           </div>
+        ) : currentScreen === 'med-chat' ? (
+          <div className="flex flex-col h-[calc(100vh-180px)] -mt-4">
+            {/* Chat Header */}
+            <div className="bg-white/80 backdrop-blur-md border-b border-stone-100 p-4 sticky top-0 z-10 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-primary-100 rounded-2xl flex items-center justify-center">
+                  <Bot className="w-6 h-6 text-primary-600" />
+                </div>
+                <div>
+                  <h3 className="font-black text-stone-800 text-sm tracking-tight"><T k="mediChat">MediChat Assistant</T></h3>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    <span className="text-[10px] font-bold text-stone-400 uppercase tracking-widest"><T k="alwaysOn">Always On</T></span>
+                  </div>
+                </div>
+              </div>
+              <button 
+                onClick={() => setChatMessages([{ id: 'welcome', role: 'assistant', content: 'Chat history cleared. How can I help you?', timestamp: new Date() }])}
+                className="p-2 text-stone-400 hover:text-stone-600 transition-colors"
+              >
+                <RefreshCw className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Messages Area */}
+            <div 
+              ref={chatScrollRef}
+              className="flex-1 overflow-y-auto p-4 space-y-4 scroll-smooth"
+            >
+              {chatMessages.map((msg) => (
+                <motion.div 
+                  key={msg.id}
+                  initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                >
+                  <div className={`max-w-[85%] p-4 rounded-3xl shadow-sm ${
+                    msg.role === 'user' 
+                      ? 'bg-primary-600 text-white rounded-tr-none' 
+                      : 'bg-white border border-stone-100 text-stone-800 rounded-tl-none'
+                  }`}>
+                    <p className="text-sm font-medium leading-relaxed whitespace-pre-wrap">{msg.content}</p>
+                    <p className={`text-[10px] mt-1.5 font-bold uppercase opacity-50 ${msg.role === 'user' ? 'text-white' : 'text-stone-400'}`}>
+                      {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </p>
+                  </div>
+                </motion.div>
+              ))}
+              {isChatLoading && (
+                <div className="flex justify-start">
+                  <div className="bg-white border border-stone-100 p-4 rounded-3xl rounded-tl-none flex items-center gap-2">
+                    <div className="flex gap-1">
+                      <div className="w-1.5 h-1.5 bg-primary-400 rounded-full animate-bounce [animation-delay:-0.3s]" />
+                      <div className="w-1.5 h-1.5 bg-primary-400 rounded-full animate-bounce [animation-delay:-0.15s]" />
+                      <div className="w-1.5 h-1.5 bg-primary-400 rounded-full animate-bounce" />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Chat Input Area */}
+            <div className="p-4 bg-white/80 backdrop-blur-md border-t border-stone-100 sticky bottom-0">
+              <div className="flex items-center gap-2 bg-stone-50 border border-stone-200 rounded-3xl p-1.5 focus-within:ring-2 focus-within:ring-primary-500/20 transition-all">
+                <input 
+                  type="text" 
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
+                  placeholder={t_func_ctx('chatPlaceholder', "Ask anything...")}
+                  className="flex-1 bg-transparent border-none focus:outline-none px-3 py-2 text-sm font-medium"
+                />
+                <button 
+                  onClick={handleSendMessage}
+                  disabled={!chatInput.trim() || isChatLoading}
+                  className="w-10 h-10 bg-primary-600 text-white rounded-2xl flex items-center justify-center hover:bg-primary-700 disabled:opacity-50 transition-all active:scale-90"
+                >
+                  <Send className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="flex gap-2 mt-3 overflow-x-auto pb-1 scrollbar-hide">
+                {['Common dosages', 'Fever first aid', 'Maternal care', 'Emergency tips'].map((suggestion) => (
+                  <button 
+                    key={suggestion}
+                    onClick={() => { setChatInput(suggestion); }}
+                    className="flex-shrink-0 px-3 py-1.5 bg-white border border-stone-200 rounded-full text-[10px] font-black text-stone-500 uppercase tracking-widest hover:border-primary-400 hover:text-primary-600 transition-all"
+                  >
+                    {suggestion}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
         ) : currentScreen === 'supply-requests' ? (
           <div className="pb-24">
             <div className="bg-white p-6 rounded-[32px] border border-stone-100 shadow-xl mb-8">
@@ -3587,7 +3769,7 @@ Crucially, all the values inside the JSON MUST be translated to this language: $
         <nav className="h-20 bg-white border-t border-stone-100 flex items-center justify-around px-4 pb-2 relative z-10 shadow-[0_-4px_20px_-10px_rgba(0,0,0,0.05)]">
           <NavItem icon={Home} label={t_func_ctx('home', "Home")} active={currentScreen === 'home'} onClick={() => setCurrentScreen('home')} />
           <NavItem icon={ClipboardList} label={t_func_ctx('records', "Records")} active={currentScreen === 'patient-records'} onClick={() => setCurrentScreen('patient-records')} />
-          <NavItem icon={Bot} label={t_func_ctx('mediAssistant', "Assistant")} k="medAssistant" active={currentScreen === 'med-assistant'} onClick={() => setCurrentScreen('med-assistant')} />
+          <NavItem icon={Bot} label={t_func_ctx('mediChat', "Chat")} k="mediChat" active={currentScreen === 'med-chat'} onClick={() => setCurrentScreen('med-chat')} />
           <NavItem icon={Mic} label={t_func_ctx('voice', "Voice")} active={currentScreen === 'voice-diary'} onClick={() => setCurrentScreen('voice-diary')} />
           <NavItem icon={User} label={t_func_ctx('profile', "Profile")} active={currentScreen === 'profile'} onClick={() => setCurrentScreen('profile')} />
         </nav>
@@ -3632,7 +3814,7 @@ Crucially, all the values inside the JSON MUST be translated to this language: $
 
               {/* Drawer Links */}
               <div className="flex-1 overflow-y-auto py-4">
-                <DrawerItem icon={Activity} label={t_func_ctx('medAssistant', "Medi Assistant")} onClick={() => { setCurrentScreen('med-assistant'); setIsDrawerOpen(false); }} />
+                <DrawerItem icon={MessageSquare} label={t_func_ctx('mediChat', "MediChat Assistant")} onClick={() => { setCurrentScreen('med-chat'); setIsDrawerOpen(false); }} />
                 <DrawerItem icon={Download} label={t_func_ctx('shareRecords', "Share Records PDF")} onClick={() => { setShowShareDialog(true); setIsDrawerOpen(false); }} />
                 <DrawerItem icon={Settings} label={t_func_ctx('settings', "Settings")} onClick={() => { setCurrentScreen('settings'); setIsDrawerOpen(false); }} />
                 <DrawerItem icon={Globe} label={t_func_ctx('selectLanguage', "Select Language")} onClick={() => { setCurrentScreen('language'); setIsDrawerOpen(false); }} />

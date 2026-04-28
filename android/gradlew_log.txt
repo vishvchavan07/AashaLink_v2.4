@@ -1,0 +1,10 @@
+Initialized native services in: /Users/vishv/.gradle/native
+Initialized jansi services in: /Users/vishv/.gradle/native
+The client will now receive all logging from the daemon (pid: 55967). The daemon log file: /Users/vishv/.gradle/daemon/8.14/daemon-55967.out.log
+Starting 3rd build in daemon [uptime: 17 mins 38.371 secs, performance: 100%, GC rate: 0.00/s, heap usage: 0% of 8 GiB, non-heap usage: 3% of 4 GiB]
+Using 10 worker leases.
+Now considering [/Users/vishv/AashaLinkV.1.2/android, /Users/vishv/Desktop/flutter/packages/flutter_tools/gradle] as hierarchies to watch
+Watching the file system is configured to be enabled if available
+File system watching is active
+Starting Build
+Now considering [/Users/vishv/Desktop/flutter/packages/flutter_tools/gradle, /Users/vishv/AashaLinkV.1.2/android] as hierarchies to watch
